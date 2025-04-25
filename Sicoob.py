@@ -3,12 +3,14 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 import locale
+from io import BytesIO
 
-# Ajustar locale para português (Brasil)
+# Ajuste de locale para português (Brasil) de maneira mais segura
 try:
+    # Tentar usar um local mais genérico
     locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
-except:
-    locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
+except locale.Error:
+    st.warning("⚠️ Não foi possível configurar o local para português. A formatação de datas pode não estar no formato brasileiro.")
 
 # Configurações da página
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
@@ -23,11 +25,17 @@ if uploaded_file:
     
     # Garantir que os dados necessários estão presentes
     if "Data" in df.columns and "Valor" in df.columns:
+        # Convertendo a coluna 'Data' para o formato datetime
         df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
         df = df.sort_values("Data")
+        
+        # Classificando as transações em 'Entrada' e 'Saída'
         df["Tipo"] = df["Valor"].apply(lambda x: "Entrada" if x > 0 else "Saída")
+        
+        # Calculando o saldo acumulado
         df["Saldo Acumulado"] = df["Valor"].cumsum()
 
+        # Exibindo o dataframe
         st.success(f"✅ **{len(df)}** transações carregadas.")
         st.dataframe(df, use_container_width=True)
 
@@ -63,7 +71,7 @@ if uploaded_file:
         fig3.update_layout(template="plotly_dark", showlegend=True, height=400)
         st.plotly_chart(fig3, use_container_width=True)
 
-        # Exportação
+        # Exportação dos dados
         buffer = BytesIO()
         df.to_excel(buffer, index=False)
         buffer.seek(0)
