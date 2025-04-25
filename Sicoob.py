@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-import fitz  # PyMuPDF
+import PyMuPDF as fitz
 import re
 from io import BytesIO
 import plotly.express as px
