@@ -2,15 +2,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
-import locale
 from io import BytesIO
-
-# Ajuste de locale para português (Brasil) de maneira mais segura
-try:
-    # Tentar usar um local mais genérico
-    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
-except locale.Error:
-    st.warning("⚠️ Não foi possível configurar o local para português. A formatação de datas pode não estar no formato brasileiro.")
 
 # Configurações da página
 st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
