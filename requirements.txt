@@ -1,4 +1,4 @@
-streamlit==1.19.0
-pandas==1.5.3
-PyMuPDF==1.21.2  # A versão mais estável de PyMuPDF
+streamlit==1.44.1
+pandas==2.2.3
+PyMuPDF==1.18.19  # Versão estável recomendada
 plotly==5.13.0
