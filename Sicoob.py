@@ -1,83 +1,107 @@
-import streamlit as st
-import pandas as pd
-import plotly.express as px
-from io import BytesIO
+import matplotlib.pyplot as plt
+from matplotlib.ticker import ScalarFormatter
+import numpy as np
+import math
+import os
 
-# Configuração da página
-st.set_page_config(page_title="Dashboard Financeiro", layout="wide")
-st.title("📄 Dashboard Financeiro - Análise de Transações")
+def gerar_grafico_emissao(nome_base='grafico_emissoes_mestrado',
+                           caminho=r"C:\Users\Usuário\PycharmProjects\PythonProject\gráfico_emissions_mestrado"):
+    # Cria a pasta, se não existir
+    os.makedirs(caminho, exist_ok=True)
 
-# Upload de planilha
-uploaded_file = st.file_uploader("📎 Selecione a planilha de extratos (Excel)", type=["xlsx"])
+    # Categorias
+    categories = [
+        r"Gasolina",
+        r"Diesel",
+        r"Energia Elétrica",
+        r"Cama de Frango",
+        r"Palha de Café",
+        r"Fertilizante (N)",
+        r"Calcário",
+        r"Emissão Total"
+    ]
 
-if uploaded_file:
-    df = pd.read_excel(uploaded_file)
+    # Valores
+    plantio_values = [15.06, 71.37, 10.19, 775.45, 0.00, 311.85, 715.00, 0]
+    producao_values = [30.12, 31.54, 10.19, 0.00, 635.04, 1625.40, 476.67, 0]
+    plantio_values[-1] = sum(plantio_values[:-1])
+    producao_values[-1] = sum(producao_values[:-1])
 
-    if "Data" in df.columns and "Valor" in df.columns:
-        df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
-        df = df.dropna(subset=["Data"])
-        df = df.sort_values("Data")
+    y_pos = np.arange(len(categories))
+    bar_height = 0.35
 
-        # Tipo de transação
-        df["Tipo"] = df["Valor"].apply(lambda x: "Entrada" if x > 0 else "Saída")
+    plt.rc('font', family='Times New Roman', size=14)
+    fig, ax = plt.subplots(figsize=(12, 7))
 
-        # Saldo acumulado
-        df["Saldo Acumulado"] = df["Valor"].cumsum()
+    bars1 = ax.barh(y_pos - bar_height/2, producao_values, height=bar_height,
+                    color='red', label='Produção')
+    bars2 = ax.barh(y_pos + bar_height/2, plantio_values, height=bar_height,
+                    color='white', edgecolor='red', hatch='//', label='Plantio')
 
-        st.success(f"✅ **{len(df)}** transações carregadas.")
-        st.dataframe(df, use_container_width=True)
+    def arredondar_1_casa_decimal(val):
+        return math.floor(val * 10 + 0.5) / 10
 
-        st.markdown("---")
-        st.header("📊 Dashboard Financeiro")
+    def format_val(val):
+        arredondado = arredondar_1_casa_decimal(val)
+        return f'{arredondado:.1f}'.replace('.', ',')
 
-        # 📈 Saldo acumulado
-        st.subheader("Saldo Acumulado")
-        fig1 = px.area(df, x="Data", y="Saldo Acumulado", markers=True, title="Saldo Acumulado ao Longo do Tempo")
-        fig1.update_layout(xaxis_title="Data", yaxis_title="Saldo (R$)", template="plotly_dark", height=400)
-        st.plotly_chart(fig1, use_container_width=True)
+    def format_pct(pct):
+        arredondado = arredondar_1_casa_decimal(pct)
+        return f'{arredondado:.1f}%'.replace('.', ',')
 
-        # 📉 Entradas e saídas por mês
-        st.subheader("Entradas e Saídas Mensais")
-        df["AnoMes"] = df["Data"].dt.to_period("M")
-        resumo = df.groupby(["AnoMes", "Tipo"])["Valor"].sum().reset_index()
-        resumo["AnoMes"] = resumo["AnoMes"].astype(str)
-        fig2 = px.bar(resumo, x="AnoMes", y="Valor", color="Tipo", barmode="group",
-                      title="Entradas vs Saídas Mensais")
-        fig2.update_layout(xaxis_title="Mês/Ano", yaxis_title="Valor (R$)", template="plotly_dark", height=400)
-        st.plotly_chart(fig2, use_container_width=True)
+    total_plantio = plantio_values[-1]
+    total_producao = producao_values[-1]
+    offset = max(total_plantio, total_producao) * 0.01 + 10
 
-        # 🥧 Donut de despesas (se coluna existir)
-        if "Histórico" in df.columns:
-            st.subheader("Categorias das Despesas")
-            categorias = df[df["Tipo"] == "Saída"].groupby("Histórico")["Valor"].sum().reset_index()
-            categorias["Valor"] = -categorias["Valor"]
-            categorias = categorias[categorias["Valor"] > 0]
-            total = categorias["Valor"].sum()
-            categorias = categorias[categorias["Valor"] / total >= 0.01]
-
-            if not categorias.empty:
-                fig3 = px.pie(categorias, names="Histórico", values="Valor", hole=0.6,
-                              title="Distribuição das Despesas")
-                fig3.update_traces(textinfo='percent', textposition='inside', pull=[0.05]*len(categorias))
-                fig3.update_layout(template="plotly_dark", showlegend=True, height=400)
-                st.plotly_chart(fig3, use_container_width=True)
-            else:
-                st.info("ℹ️ Nenhuma despesa acima de 1% encontrada.")
+    for i, bar in enumerate(bars1):
+        valor = bar.get_width()
+        if i != len(categories) - 1 and valor > 0:
+            pct = (valor / total_producao) * 100
+            label = f'{format_val(valor)} ({format_pct(pct)})' if pct >= 0.1 else f'{format_val(valor)}'
         else:
-            st.warning("⚠️ A coluna 'Histórico' não está presente para gerar o gráfico de despesas.")
+            label = format_val(valor)
+        ax.text(valor + offset, bar.get_y() + bar.get_height()/2,
+                label, va='center', fontsize=13, color='black')
 
-        # 📥 Exportar para Excel
-        buffer = BytesIO()
-        df.to_excel(buffer, index=False)
-        buffer.seek(0)
+    for i, bar in enumerate(bars2):
+        valor = bar.get_width()
+        if i != len(categories) - 1 and valor > 0:
+            pct = (valor / total_plantio) * 100
+            label = f'{format_val(valor)} ({format_pct(pct)})' if pct >= 0.1 else f'{format_val(valor)}'
+        else:
+            label = format_val(valor)
+        ax.text(valor + offset, bar.get_y() + bar.get_height()/2,
+                label, va='center', fontsize=13, color='black')
 
-        st.download_button(
-            label="📥 Baixar Excel com Dados",
-            data=buffer,
-            file_name="extrato_detalhado.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        )
-    else:
-        st.warning("⚠️ A planilha precisa conter as colunas 'Data' e 'Valor'.")
-else:
-    st.info("📎 Faça o upload de uma planilha para gerar os gráficos.")
+    ax.set_yticks(y_pos)
+    ax.set_yticklabels(categories)
+    ax.set_xlabel('Emissões (kg CO$_2$eq ha$^{-1}$ ano$^{-1}$)', fontsize=14)
+    ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
+    ax.xaxis.get_offset_text().set_fontsize(13)
+    ax.xaxis.grid(True, linestyle='--', alpha=0.4)
+    ax.spines['top'].set_visible(False)
+    ax.spines['right'].set_visible(False)
+    handles, labels = ax.get_legend_handles_labels()
+    ax.legend(handles[::-1], labels[::-1], fontsize=14, loc='lower right')
+
+    plt.tight_layout()
+
+    # Caminhos
+    caminho_jpg = os.path.join(caminho, f"{nome_base}.jpg")
+    caminho_pdf = os.path.join(caminho, f"{nome_base}.pdf")
+
+    # Salvar arquivos
+    plt.savefig(caminho_jpg, format='jpg', bbox_inches='tight', dpi=300)
+    plt.savefig(caminho_pdf, format='pdf', bbox_inches='tight')
+
+    # Mostrar gráfico na tela
+    plt.show()
+
+    # Confirmação
+    print(f"✅ Gráfico salvo com sucesso:")
+    print(f"📄 JPG: {caminho_jpg}")
+    print(f"📄 PDF: {caminho_pdf}")
+
+# Executar ao rodar o script
+if __name__ == "__main__":
+    gerar_grafico_emissao()
