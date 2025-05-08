@@ -2,10 +2,10 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="Dashboard de Extratos", layout="wide")
-st.title("📊 Dashboard de Extratos Bancários - Excel com Várias Abas")
+st.set_page_config(layout="wide")
+st.title("📊 Dashboard de Extratos Bancários - Sicoob e Caixa")
 
-# 🔍 Função para encontrar nome de coluna similar
+# 🔍 Função auxiliar para localizar a coluna de histórico
 def encontrar_coluna_similar(df, nomes_possiveis):
     for nome in nomes_possiveis:
         for coluna in df.columns:
@@ -13,28 +13,25 @@ def encontrar_coluna_similar(df, nomes_possiveis):
                 return coluna
     return None
 
-# 📂 Upload de múltiplas planilhas
+# 📂 Upload de arquivos Excel
 uploaded_files = st.file_uploader("📎 Selecione os arquivos Excel", type=["xlsx"], accept_multiple_files=True)
 
 if uploaded_files:
     for uploaded_file in uploaded_files:
-        st.markdown("---")
         st.header(f"📁 Arquivo: {uploaded_file.name}")
         
-        # Carregar as abas
         xls = pd.ExcelFile(uploaded_file)
         abas = xls.sheet_names
         aba_selecionada = st.selectbox(f"Selecione a aba do arquivo {uploaded_file.name}", abas, key=uploaded_file.name)
 
-        # Carregar a aba escolhida
         df = xls.parse(aba_selecionada)
 
-        # Verifica se colunas mínimas estão presentes
+        # Confere se tem as colunas mínimas obrigatórias
         if "Data" in df.columns and "Tipo" in df.columns and "Valor" in df.columns:
             df["Data"] = pd.to_datetime(df["Data"], errors='coerce')
+            df["AnoMes"] = df["Data"].dt.strftime('%Y-%m')
             df = df.dropna(subset=["Data"])
             df = df.sort_values("Data")
-            df["AnoMes"] = df["Data"].dt.strftime('%Y-%m')
 
             st.success(f"✅ {len(df)} transações carregadas.")
             st.dataframe(df, use_container_width=True)
@@ -49,10 +46,10 @@ if uploaded_files:
 
                 st.subheader("📅 Tabela de Saldos Mensais")
                 resumo_saldos = df_saldo[["AnoMes", "Saldo Anterior"]].copy()
-                resumo_saldos["AnoMes"] = resumo_saldos["AnoMes"].astype(str)
-                st.dataframe(resumo_saldos.rename(columns={"AnoMes": "Mês", "Saldo Anterior": "Saldo Final"}), use_container_width=True)
+                resumo_saldos = resumo_saldos.rename(columns={"AnoMes": "Mês", "Saldo Anterior": "Saldo Final"})
+                st.dataframe(resumo_saldos, use_container_width=True)
             else:
-                st.info("ℹ️ Nenhum saldo mensal encontrado ou coluna 'Saldo Anterior' ausente.")
+                st.info("ℹ️ Nenhum saldo mensal encontrado ou a coluna 'Saldo Anterior' está ausente.")
 
             # 📉 Entradas vs Saídas
             st.subheader("📉 Entradas e Saídas Mensais")
@@ -78,10 +75,11 @@ if uploaded_files:
                 fig2.update_layout(xaxis_title="Mês/Ano", yaxis_title="Valor (R$)", template="plotly_dark", height=500)
                 st.plotly_chart(fig2, use_container_width=True)
 
-                # 🥧 Pizza de Despesas
-                st.subheader("🥧 Despesas por Categoria")
+                # 🥧 Gráfico Donut de Despesas
+                st.subheader("🥧 Categorias das Despesas")
                 categorias = df[df["Tipo"] == "Saída"].groupby(col_hist)["Valor"].sum().reset_index()
                 categorias["Valor"] = -categorias["Valor"]
+                categorias = categorias[categorias["Valor"] > 0]
                 total = categorias["Valor"].sum()
                 categorias = categorias[categorias["Valor"] / total >= 0.01]
 
@@ -92,6 +90,6 @@ if uploaded_files:
             else:
                 st.warning("⚠️ Nenhuma coluna com nome semelhante a 'Histórico' foi encontrada.")
         else:
-            st.warning("⚠️ A aba selecionada não possui as colunas esperadas: 'Data', 'Tipo' e 'Valor'.")
+            st.warning("⚠️ A aba selecionada não possui as colunas esperadas: 'Data', 'Tipo', 'Valor'.")
 else:
-    st.info("📎 Faça upload de planilhas Excel com colunas: Data, Tipo, Valor (e opcionalmente Histórico, Saldo Anterior).")
+    st.info("📎 Faça upload de planilhas com extratos contendo as colunas: Data, Tipo, Valor e Histórico.")
