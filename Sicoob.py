@@ -1,107 +1,220 @@
-import matplotlib.pyplot as plt
-from matplotlib.ticker import ScalarFormatter
-import numpy as np
-import math
-import os
+import streamlit as st
+import pandas as pd
+import fitz  # PyMuPDF
+import re
+from io import BytesIO
+import plotly.express as px
+import locale
 
-def gerar_grafico_emissao(nome_base='grafico_emissoes_mestrado',
-                           caminho=r"C:\Users\Usuário\PycharmProjects\PythonProject\gráfico_emissions_mestrado"):
-    # Cria a pasta, se não existir
-    os.makedirs(caminho, exist_ok=True)
+# Ajustar locale para português (Brasil)
+try:
+    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except:
+    locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
 
-    # Categorias
-    categories = [
-        r"Gasolina",
-        r"Diesel",
-        r"Energia Elétrica",
-        r"Cama de Frango",
-        r"Palha de Café",
-        r"Fertilizante (N)",
-        r"Calcário",
-        r"Emissão Total"
-    ]
+# Configuração da página
+st.set_page_config(page_title="Extrator de Extratos Bancários", page_icon="📄", layout="wide")
+st.title("📄 Extrator de Extratos Bancários - Versão Ultra-Robusta 🚀")
+st.markdown("---")
 
-    # Valores
-    plantio_values = [15.06, 71.37, 10.19, 775.45, 0.00, 311.85, 715.00, 0]
-    producao_values = [30.12, 31.54, 10.19, 0.00, 635.04, 1625.40, 476.67, 0]
-    plantio_values[-1] = sum(plantio_values[:-1])
-    producao_values[-1] = sum(producao_values[:-1])
+# 📎 Upload de arquivos e inputs via sidebar
+with st.sidebar:
+    uploaded_files = st.file_uploader("📎 Selecione os arquivos PDF dos extratos", type=["pdf"], accept_multiple_files=True)
+    ano_padrao = st.number_input("📅 Informe o ano dos extratos (caso datas venham sem ano):", min_value=2000, max_value=2100, value=2024, step=1)
+    saldo_inicial = st.number_input("💰 Informe o saldo inicial (opcional):", value=0.0, step=100.0)
+    tipo_filtro = st.selectbox("🔎 Filtrar por tipo:", ["Todos", "Entradas", "Saídas"])
 
-    y_pos = np.arange(len(categories))
-    bar_height = 0.35
+# Função robusta para extrair transações
+def extrair_transacoes(texto, ano_padrao=None):
+    linhas = texto.split('\n')
+    transacoes = []
+    i = 0
 
-    plt.rc('font', family='Times New Roman', size=14)
-    fig, ax = plt.subplots(figsize=(12, 7))
+    padrao_data = re.compile(r'^\d{2}[-/]\d{2}([-/]\d{4})?$')
+    padrao_valor = re.compile(r'^[\d\.,]+[DC]?$')
 
-    bars1 = ax.barh(y_pos - bar_height/2, producao_values, height=bar_height,
-                    color='red', label='Produção')
-    bars2 = ax.barh(y_pos + bar_height/2, plantio_values, height=bar_height,
-                    color='white', edgecolor='red', hatch='//', label='Plantio')
+    while i < len(linhas):
+        linha = linhas[i].strip()
 
-    def arredondar_1_casa_decimal(val):
-        return math.floor(val * 10 + 0.5) / 10
+        if padrao_data.match(linha):
+            data = linha
+            if len(data.split('/')) == 2 and ano_padrao:
+                data = f"{data}/{ano_padrao}"
 
-    def format_val(val):
-        arredondado = arredondar_1_casa_decimal(val)
-        return f'{arredondado:.1f}'.replace('.', ',')
+            historico = ""
+            descricao = []
+            valor = None
+            tipo = None
 
-    def format_pct(pct):
-        arredondado = arredondar_1_casa_decimal(pct)
-        return f'{arredondado:.1f}%'.replace('.', ',')
+            i += 1
+            while i < len(linhas):
+                linha2 = linhas[i].strip()
 
-    total_plantio = plantio_values[-1]
-    total_producao = producao_values[-1]
-    offset = max(total_plantio, total_producao) * 0.01 + 10
+                if padrao_data.match(linha2):
+                    break
 
-    for i, bar in enumerate(bars1):
-        valor = bar.get_width()
-        if i != len(categories) - 1 and valor > 0:
-            pct = (valor / total_producao) * 100
-            label = f'{format_val(valor)} ({format_pct(pct)})' if pct >= 0.1 else f'{format_val(valor)}'
+                if padrao_valor.match(linha2) and valor is None:
+                    tipo = 'C' if linha2.endswith('C') else ('D' if linha2.endswith('D') else None)
+                    valor_str = linha2.rstrip('DC').replace('.', '').replace(',', '.')
+                    try:
+                        valor = float(valor_str)
+                        if tipo == 'D':
+                            valor = -valor
+                    except:
+                        valor = None
+                else:
+                    if not historico and not padrao_valor.match(linha2):
+                        historico = linha2
+                    elif not padrao_valor.match(linha2):
+                        descricao.append(linha2)
+
+                i += 1
+
+            if valor is not None and historico:
+                transacoes.append([data, historico, valor, " | ".join(descricao)])
         else:
-            label = format_val(valor)
-        ax.text(valor + offset, bar.get_y() + bar.get_height()/2,
-                label, va='center', fontsize=13, color='black')
+            i += 1
 
-    for i, bar in enumerate(bars2):
-        valor = bar.get_width()
-        if i != len(categories) - 1 and valor > 0:
-            pct = (valor / total_plantio) * 100
-            label = f'{format_val(valor)} ({format_pct(pct)})' if pct >= 0.1 else f'{format_val(valor)}'
-        else:
-            label = format_val(valor)
-        ax.text(valor + offset, bar.get_y() + bar.get_height()/2,
-                label, va='center', fontsize=13, color='black')
+    return transacoes
 
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(categories)
-    ax.set_xlabel('Emissões (kg CO$_2$eq ha$^{-1}$ ano$^{-1}$)', fontsize=14)
-    ax.xaxis.set_major_formatter(ScalarFormatter(useMathText=True))
-    ax.xaxis.get_offset_text().set_fontsize(13)
-    ax.xaxis.grid(True, linestyle='--', alpha=0.4)
-    ax.spines['top'].set_visible(False)
-    ax.spines['right'].set_visible(False)
-    handles, labels = ax.get_legend_handles_labels()
-    ax.legend(handles[::-1], labels[::-1], fontsize=14, loc='lower right')
+# Função para detectar se histórico indica saldo
+def contem_palavra_saldo(texto):
+    if isinstance(texto, str):
+        texto = texto.lower()
+        return any(palavra in texto for palavra in ["saldo", "saldo anterior", "saldo atual", "saldo final", "saldo inicial"])
+    return False
 
-    plt.tight_layout()
+# Processamento dos arquivos
+if uploaded_files:
+    todas_transacoes = []
 
-    # Caminhos
-    caminho_jpg = os.path.join(caminho, f"{nome_base}.jpg")
-    caminho_pdf = os.path.join(caminho, f"{nome_base}.pdf")
+    for arquivo in uploaded_files:
+        st.info(f"🔍 Processando: **{arquivo.name}**")
+        try:
+            with fitz.open(stream=arquivo.read(), filetype="pdf") as doc:
+                texto_completo = "".join(pagina.get_text("text") for pagina in doc)
 
-    # Salvar arquivos
-    plt.savefig(caminho_jpg, format='jpg', bbox_inches='tight', dpi=300)
-    plt.savefig(caminho_pdf, format='pdf', bbox_inches='tight')
+            transacoes = extrair_transacoes(texto_completo, ano_padrao=ano_padrao)
 
-    # Mostrar gráfico na tela
-    plt.show()
+            if transacoes:
+                for linha in transacoes:
+                    linha.append(arquivo.name)
+                    todas_transacoes.append(linha)
+            else:
+                st.warning(f"⚠️ Nenhuma transação reconhecida em **{arquivo.name}**.")
+        except Exception as e:
+            st.error(f"❌ Erro ao processar {arquivo.name}: {e}")
 
-    # Confirmação
-    print(f"✅ Gráfico salvo com sucesso:")
-    print(f"📄 JPG: {caminho_jpg}")
-    print(f"📄 PDF: {caminho_pdf}")
+    if todas_transacoes:
+        # Criação do DataFrame
+        df = pd.DataFrame(todas_transacoes, columns=["Data", "Histórico", "Valor", "Descrição", "Arquivo"])
+        df["Índice"] = df.index
+        df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors='coerce')
+        df = df.dropna(subset=["Data"])
+        df = df.sort_values(["Data", "Índice"]).drop(columns=["Índice"])
 
-# Executar ao rodar o script
-if __name__ == "__main__":
-    gerar_grafico_emissao()
+        # 📋 Identificar corretamente saldo final de cada mês
+        df["AnoMes"] = df["Data"].dt.to_period("M")
+
+        def encontrar_saldo_final(grupo):
+            saldo_entries = grupo[grupo["Histórico"].apply(contem_palavra_saldo)]
+            if not saldo_entries.empty:
+                return saldo_entries["Data"].idxmax()
+            else:
+                return grupo["Data"].idxmax()
+
+        ultimos_indices = df.groupby("AnoMes").apply(encontrar_saldo_final)
+        ultimos_indices = ultimos_indices.dropna().values
+
+        # Classificar Tipos: Saldo, Entrada, Saída
+        df["Tipo"] = df.index.map(lambda idx: "Saldo" if idx in ultimos_indices else ("Entrada" if df.at[idx, "Valor"] > 0 else "Saída"))
+
+        # Criar coluna Saldo Anterior
+        df["Saldo Anterior"] = None
+        df.loc[df["Tipo"] == "Saldo", "Saldo Anterior"] = df["Valor"]
+        df["Saldo Anterior"] = pd.to_numeric(df["Saldo Anterior"], errors="coerce")
+
+        # Filtro por tipo (opcional)
+        if tipo_filtro != "Todos":
+            df = df[df["Tipo"] == tipo_filtro[:-1]]
+
+        st.success(f"✅ **{len(df)}** transações extraídas com sucesso.")
+        st.dataframe(df, use_container_width=True)
+
+        st.markdown("---")
+        st.header("📊 Dashboard Financeiro")
+
+        # 📈 Gráfico de Saldo Final por Mês
+        st.subheader("Saldo Final de Cada Mês")
+        df_saldo_mensal = df[df["Tipo"] == "Saldo"]
+        fig1 = px.line(df_saldo_mensal, x="Data", y="Saldo Anterior", markers=True, title="Saldo Final Mensal")
+        fig1.update_layout(xaxis_title="Data", yaxis_title="Saldo (R$)", template="plotly_dark", height=500)
+        st.plotly_chart(fig1, use_container_width=True)
+
+        # 📅 Tabela resumo de saldo por mês
+        st.subheader("📅 Tabela de Saldos Mensais")
+        resumo_saldos = df_saldo_mensal[["AnoMes", "Saldo Anterior"]].copy()
+        resumo_saldos["AnoMes"] = resumo_saldos["AnoMes"].astype(str)
+        st.dataframe(resumo_saldos.rename(columns={"AnoMes": "Mês", "Saldo Anterior": "Saldo Final"}), use_container_width=True)
+
+        # 📉 Gráfico de Entradas vs Saídas
+        st.subheader("Entradas e Saídas Mensais")
+
+        palavras_excluir = ["saldo", "saldo anterior", "saldo atual", "saldo final", "saldo inicial"]
+
+        def historico_tem_saldo(texto):
+            texto = str(texto).lower()
+            return any(palavra in texto for palavra in palavras_excluir)
+
+        df_mov = df[df["Tipo"].isin(["Entrada", "Saída"])].copy()
+        df_mov = df_mov[~df_mov["Histórico"].apply(historico_tem_saldo)]
+
+        df_mov["AnoMes"] = df_mov["Data"].dt.strftime('%m/%Y')
+        resumo = df_mov.groupby(["AnoMes", "Tipo"])["Valor"].sum().reset_index()
+
+        fig2 = px.bar(
+            resumo,
+            x="AnoMes",
+            y="Valor",
+            color="Tipo",
+            barmode="group",
+            title="Entradas vs Saídas Mensais"
+        )
+        fig2.update_layout(
+            xaxis_title="Mês/Ano",
+            yaxis_title="Valor (R$)",
+            template="plotly_dark",
+            height=500
+        )
+        st.plotly_chart(fig2, use_container_width=True)
+
+        # 🥧 Gráfico Donut de Despesas
+        st.subheader("Categorias das Despesas")
+        categorias = df[df["Tipo"] == "Saída"].groupby("Histórico")["Valor"].sum().reset_index()
+        categorias["Valor"] = -categorias["Valor"]
+        categorias = categorias[categorias["Valor"] > 0]
+        total = categorias["Valor"].sum()
+        categorias = categorias[categorias["Valor"] / total >= 0.01]
+
+        fig3 = px.pie(categorias, names="Histórico", values="Valor", hole=0.6,
+                      title="Distribuição das Despesas")
+        fig3.update_traces(textinfo='percent+label', textposition='inside', pull=[0.05]*len(categorias))
+        fig3.update_layout(template="plotly_dark", showlegend=True, height=500)
+        st.plotly_chart(fig3, use_container_width=True)
+
+        # 📥 Exportação para Excel
+        buffer = BytesIO()
+        df.to_excel(buffer, index=False)
+        buffer.seek(0)
+
+        st.download_button(
+            label="📥 Baixar Excel com Dados",
+            data=buffer,
+            file_name="extrato_bancario_detalhado.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
+
+    else:
+        st.warning("⚠️ Nenhuma transação reconhecida em nenhum dos PDFs.")
+else:
+    st.info("📎 Faça o upload dos extratos bancários em PDF para iniciar a extração.")
