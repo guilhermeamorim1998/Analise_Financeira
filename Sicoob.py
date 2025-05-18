@@ -4,12 +4,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 from io import BytesIO
 import locale
+import platform
 
-# Ajuste de localização
+# Ajuste de localização multiplataforma
 try:
-    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
-except:
-    locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
+    if platform.system() == "Windows":
+        locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
+    else:
+        locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except locale.Error:
+    st.warning("⚠️ Locale pt_BR.UTF-8 ou equivalente não disponível no sistema.")
 
 # Configuração da página
 st.set_page_config(page_title="Dashboard Financeiro Unificado", layout="wide")
