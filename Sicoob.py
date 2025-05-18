@@ -1,20 +1,26 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 from io import BytesIO
+import locale
+
+# Ajuste de localização
+try:
+    locale.setlocale(locale.LC_TIME, 'pt_BR.UTF-8')
+except:
+    locale.setlocale(locale.LC_TIME, 'Portuguese_Brazil.1252')
 
 # Configuração da página
-st.set_page_config(page_title="Dashboard Financeiro - Planilhas", layout="wide")
-st.title("📊 Dashboard Financeiro - Estrutura Robusta com Planilhas Excel")
+st.set_page_config(page_title="Dashboard Financeiro Unificado", layout="wide")
+st.title("📊 Dashboard Financeiro - PDF e Excel")
 st.markdown("---")
 
-# 📎 Upload de arquivos Excel com múltiplas abas
-with st.sidebar:
-    uploaded_files = st.file_uploader("📎 Selecione as planilhas Excel", type=["xlsx"], accept_multiple_files=True)
-    tipo_filtro = st.selectbox("🔎 Filtrar por tipo:", ["Todos", "Entradas", "Saídas"])
-    saldo_inicial = st.number_input("💰 Informe o saldo inicial (opcional):", value=0.0, step=100.0)
+# Seletor de fonte de dados
+fonte_dados = st.sidebar.radio("Escolha a fonte de dados:", ["📄 PDF", "📊 Excel"])
+tipo_filtro = st.sidebar.selectbox("🔎 Filtrar por tipo:", ["Todos", "Entradas", "Saídas"])
+saldo_inicial = st.sidebar.number_input("💰 Informe o saldo inicial (opcional):", value=0.0, step=100.0)
 
-# 🔍 Palavras que indicam saldo
 palavras_saldo = ["saldo", "saldo anterior", "saldo atual", "saldo final", "saldo inicial"]
 
 def contem_palavra_saldo(texto):
@@ -23,96 +29,127 @@ def contem_palavra_saldo(texto):
         return any(p in texto for p in palavras_saldo)
     return False
 
-if uploaded_files:
-    for uploaded_file in uploaded_files:
-        st.header(f"📁 Arquivo: {uploaded_file.name}")
-        xls = pd.ExcelFile(uploaded_file)
-        abas = xls.sheet_names
-        aba_selecionada = st.selectbox(f"Selecione a aba de {uploaded_file.name}", abas, key=uploaded_file.name)
+if fonte_dados == "📄 PDF":
+    import fitz
+    import re
 
-        df = xls.parse(aba_selecionada)
+    uploaded_files = st.sidebar.file_uploader("📎 Selecione os arquivos PDF dos extratos", type=["pdf"], accept_multiple_files=True)
+    ano_padrao = st.sidebar.number_input("📅 Ano dos extratos (se faltar data)", 2000, 2100, 2024)
 
-        if all(col in df.columns for col in ["Data", "Valor", "Tipo"]):
-            df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors="coerce")
-            df = df.dropna(subset=["Data"])
-            df = df.sort_values("Data")
-            df["AnoMes"] = df["Data"].dt.to_period("M")
-
-            # Classifica saldo por histórico se necessário
-            if "Histórico" in df.columns:
-                df["É Saldo?"] = df["Histórico"].apply(contem_palavra_saldo)
+    def extrair_transacoes(texto, ano_padrao=None):
+        linhas = texto.split('\n')
+        transacoes = []
+        i = 0
+        padrao_data = re.compile(r'^\d{2}[-/]\d{2}([-/]\d{4})?$')
+        padrao_valor = re.compile(r'^[\d\.,]+[DC]?$')
+        while i < len(linhas):
+            linha = linhas[i].strip()
+            if padrao_data.match(linha):
+                data = linha
+                if len(data.split('/')) == 2 and ano_padrao:
+                    data = f"{data}/{ano_padrao}"
+                historico, descricao, valor, tipo = "", [], None, None
+                i += 1
+                while i < len(linhas):
+                    linha2 = linhas[i].strip()
+                    if padrao_data.match(linha2):
+                        break
+                    if padrao_valor.match(linha2) and valor is None:
+                        tipo = 'C' if linha2.endswith('C') else ('D' if linha2.endswith('D') else None)
+                        valor_str = linha2.rstrip('DC').replace('.', '').replace(',', '.')
+                        try:
+                            valor = float(valor_str)
+                            if tipo == 'D': valor = -valor
+                        except:
+                            valor = None
+                    else:
+                        if not historico and not padrao_valor.match(linha2):
+                            historico = linha2
+                        elif not padrao_valor.match(linha2):
+                            descricao.append(linha2)
+                    i += 1
+                if valor is not None and historico:
+                    transacoes.append([data, historico, valor, " | ".join(descricao)])
             else:
-                df["É Saldo?"] = False
+                i += 1
+        return transacoes
 
-            # Saldo anterior para linha marcada como saldo
-            df["Saldo Anterior"] = df.apply(lambda row: row["Valor"] if row["Tipo"] == "Saldo" or row["É Saldo?"] else None, axis=1)
-            df["Saldo Anterior"] = pd.to_numeric(df["Saldo Anterior"], errors="coerce")
+    if uploaded_files:
+        todas_transacoes = []
+        for arquivo in uploaded_files:
+            with fitz.open(stream=arquivo.read(), filetype="pdf") as doc:
+                texto_completo = "".join(p.get_text("text") for p in doc)
+            transacoes = extrair_transacoes(texto_completo, ano_padrao)
+            for linha in transacoes:
+                linha.append(arquivo.name)
+                todas_transacoes.append(linha)
 
-            # Filtro de tipo
+        if todas_transacoes:
+            df = pd.DataFrame(todas_transacoes, columns=["Data", "Histórico", "Valor", "Descrição", "Arquivo"])
+            df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors='coerce')
+            df = df.dropna(subset=["Data"]).sort_values("Data")
+            df["AnoMes"] = df["Data"].dt.to_period("M")
+            df["Tipo"] = df["Valor"].apply(lambda x: "Entrada" if x > 0 else "Saída")
+            df["Saldo Anterior"] = df["Histórico"].apply(lambda h: df["Valor"] if contem_palavra_saldo(h) else None)
+
             if tipo_filtro != "Todos":
                 df = df[df["Tipo"] == tipo_filtro[:-1]]
 
-            st.success(f"✅ {len(df)} transações carregadas.")
-            st.dataframe(df, use_container_width=True)
+            st.success(f"✅ {len(df)} transações extraídas.")
 
-            st.markdown("---")
-            st.header("📊 Dashboard Financeiro")
-
-            # 📈 Saldo Final Mensal
-            st.subheader("📈 Saldo Final de Cada Mês")
-            df_saldo_mensal = df[df["Saldo Anterior"].notnull()]
-            fig1 = px.line(df_saldo_mensal, x="Data", y="Saldo Anterior", markers=True, title="Saldo Final Mensal")
-            fig1.update_layout(xaxis_title="Data", yaxis_title="Saldo (R$)", template="plotly_dark", height=400)
-            st.plotly_chart(fig1, use_container_width=True)
-
-            # 📈 Saldo Acumulado
-            st.subheader("📈 Evolução do Saldo Acumulado")
-            df_sorted = df.sort_values("Data").copy()
-            df_sorted["Saldo Acumulado"] = df_sorted["Valor"].cumsum() + saldo_inicial
-            fig2 = px.line(df_sorted, x="Data", y="Saldo Acumulado", title="Evolução do Saldo Acumulado")
-            fig2.update_layout(xaxis_title="Data", yaxis_title="Saldo Acumulado (R$)", template="plotly_dark", height=400)
-            st.plotly_chart(fig2, use_container_width=True)
-
-            # 📅 Tabela de saldos mensais
-            st.subheader("📅 Tabela de Saldos Mensais")
-            resumo_saldos = df_saldo_mensal[["AnoMes", "Saldo Anterior"]].copy()
-            resumo_saldos["AnoMes"] = resumo_saldos["AnoMes"].astype(str)
-            st.dataframe(resumo_saldos.rename(columns={"AnoMes": "Mês", "Saldo Anterior": "Saldo Final"}), use_container_width=True)
-
-            # 📉 Entradas vs Saídas
-            st.subheader("📉 Entradas vs Saídas Mensais")
-            df_mov = df[df["Tipo"].isin(["Entrada", "Saída"])]
-            if "Histórico" in df_mov.columns:
-                df_mov = df_mov[~df_mov["Histórico"].apply(contem_palavra_saldo)]
-            df_mov["AnoMes"] = df_mov["Data"].dt.strftime('%m/%Y')
-            resumo = df_mov.groupby(["AnoMes", "Tipo"])["Valor"].sum().reset_index()
-            fig3 = px.bar(resumo, x="AnoMes", y="Valor", color="Tipo", barmode="group", title="Entradas vs Saídas")
-            fig3.update_layout(xaxis_title="Mês/Ano", yaxis_title="Valor (R$)", template="plotly_dark", height=400)
-            st.plotly_chart(fig3, use_container_width=True)
-
-            # 🥧 Donut de Despesas
-            if "Histórico" in df.columns:
-                st.subheader("🥧 Categorias das Despesas")
-                categorias = df[df["Tipo"] == "Saída"].groupby("Histórico")["Valor"].sum().reset_index()
-                categorias["Valor"] = -categorias["Valor"]
-                total = categorias["Valor"].sum()
-                categorias = categorias[categorias["Valor"] / total >= 0.01]
-                fig4 = px.pie(categorias, names="Histórico", values="Valor", hole=0.6, title="Distribuição das Despesas")
-                fig4.update_traces(textinfo='percent+label', textposition='inside', pull=[0.05]*len(categorias))
-                fig4.update_layout(template="plotly_dark", height=400)
-                st.plotly_chart(fig4, use_container_width=True)
-
-            # 📥 Exportar Excel
-            buffer = BytesIO()
-            df.to_excel(buffer, index=False)
-            buffer.seek(0)
-            st.download_button(
-                label="📥 Baixar Excel com Dados",
-                data=buffer,
-                file_name=f"dashboard_{uploaded_file.name.replace('.xlsx','')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            )
-        else:
-            st.warning("❌ A aba selecionada precisa conter as colunas: Data, Valor, Tipo.")
 else:
-    st.info("📎 Faça o upload de planilhas Excel com colunas padrão: Data, Tipo, Valor (e opcionalmente Histórico, Saldo Anterior).")
+    uploaded_files = st.sidebar.file_uploader("📎 Selecione as planilhas Excel", type=["xlsx"], accept_multiple_files=True)
+    if uploaded_files:
+        for uploaded_file in uploaded_files:
+            st.header(f"📁 Arquivo: {uploaded_file.name}")
+            xls = pd.ExcelFile(uploaded_file)
+            aba = st.selectbox(f"Selecione a aba de {uploaded_file.name}", xls.sheet_names, key=uploaded_file.name)
+            df = xls.parse(aba)
+            if all(col in df.columns for col in ["Data", "Valor", "Tipo"]):
+                df["Data"] = pd.to_datetime(df["Data"], dayfirst=True, errors="coerce")
+                df = df.dropna(subset=["Data"]).sort_values("Data")
+                df["AnoMes"] = df["Data"].dt.to_period("M")
+                if "Histórico" in df.columns:
+                    df["Saldo Anterior"] = df.apply(lambda r: r["Valor"] if r["Tipo"] == "Saldo" or contem_palavra_saldo(r["Histórico"]) else None, axis=1)
+                else:
+                    df["Saldo Anterior"] = None
+                if tipo_filtro != "Todos":
+                    df = df[df["Tipo"] == tipo_filtro[:-1]]
+                st.success(f"✅ {len(df)} transações carregadas.")
+
+# Se houver dados carregados, exibir dashboards
+if 'df' in locals() and not df.empty:
+    st.dataframe(df, use_container_width=True)
+    st.markdown("---")
+    st.subheader("📈 Saldo Final de Cada Mês")
+    df_saldo = df[df["Saldo Anterior"].notnull()]
+    fig1 = px.line(df_saldo, x="Data", y="Saldo Anterior", markers=True)
+    st.plotly_chart(fig1, use_container_width=True)
+
+    st.subheader("📉 Entradas vs Saídas")
+    df_mov = df[df["Tipo"].isin(["Entrada", "Saída"])]
+    if "Histórico" in df.columns:
+        df_mov = df_mov[~df_mov["Histórico"].apply(contem_palavra_saldo)]
+    df_mov["AnoMes"] = df_mov["Data"].dt.strftime('%m/%Y')
+    resumo = df_mov.groupby(["AnoMes", "Tipo"])["Valor"].sum().reset_index()
+    fig2 = px.bar(resumo, x="AnoMes", y="Valor", color="Tipo", barmode="group")
+    st.plotly_chart(fig2, use_container_width=True)
+
+    if "Histórico" in df.columns:
+        st.subheader("🥧 Distribuição das Despesas")
+        categorias = df[df["Tipo"] == "Saída"].groupby("Histórico")["Valor"].sum().reset_index()
+        categorias["Valor"] = -categorias["Valor"]
+        total = categorias["Valor"].sum()
+        categorias = categorias[categorias["Valor"] / total >= 0.01]
+        fig3 = px.pie(categorias, names="Histórico", values="Valor", hole=0.6)
+        st.plotly_chart(fig3, use_container_width=True)
+
+    buffer = BytesIO()
+    df.to_excel(buffer, index=False)
+    buffer.seek(0)
+    st.download_button(
+        label="📥 Baixar Excel com Dados",
+        data=buffer,
+        file_name="dados_dashboard.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
