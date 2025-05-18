@@ -6,6 +6,9 @@ from io import BytesIO
 import locale
 import platform
 
+# ✅ Configuração da página - DEVE SER A PRIMEIRA INSTRUÇÃO DO STREAMLIT
+st.set_page_config(page_title="Dashboard Financeiro Unificado", layout="wide")
+
 # Ajuste de localização multiplataforma
 try:
     if platform.system() == "Windows":
@@ -15,8 +18,6 @@ try:
 except locale.Error:
     st.warning("⚠️ Locale pt_BR.UTF-8 ou equivalente não disponível no sistema.")
 
-# Configuração da página
-st.set_page_config(page_title="Dashboard Financeiro Unificado", layout="wide")
 st.title("📊 Dashboard Financeiro - PDF e Excel")
 st.markdown("---")
 
